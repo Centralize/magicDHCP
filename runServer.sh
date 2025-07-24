@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Source the configuration file for environment variables
-CONFIG_FILE="/home/mkaas/Development/magicDNS_Python3/magicDHCP/dhcp-server/config"
+CONFIG_FILE="config"
 if [ -f "$CONFIG_FILE" ]; then
     source "$CONFIG_FILE"
 else
@@ -10,7 +10,7 @@ else
 fi
 
 # Path to the Python DHCP server script
-DHCP_SERVER_SCRIPT="/home/mkaas/Development/magicDNS_Python3/magicDHCP/dhcp-server/src/dhcp_server.py"
+DHCP_SERVER_SCRIPT="src/dhcp_server.py"
 LOG_FILE="/var/log/dhcp-server.log" # Log file for the server output
 PID_FILE="/var/run/dhcp-server.pid" # PID file for the server process
 
