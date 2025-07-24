@@ -1,14 +1,13 @@
 #!/bin/bash
 
-# Define environment variables for the DHCP server
-# These should match the values expected by dhcp_server.py
-export DHCP_SERVER_IP="0.0.0.0"
-export DHCP_LEASE_START_IP="192.168.1.100"
-export DHCP_LEASE_END_IP="192.168.1.200"
-export DHCP_SUBNET_MASK="255.255.255.0"
-export DHCP_ROUTER_IP="192.168.1.1"
-export DHCP_DNS_SERVERS="8.8.8.8,8.8.4.4"
-export DHCP_LEASE_TIME="3600" # seconds
+# Source the configuration file for environment variables
+CONFIG_FILE="/home/mkaas/Development/magicDNS_Python3/magicDHCP/dhcp-server/config"
+if [ -f "$CONFIG_FILE" ]; then
+    source "$CONFIG_FILE"
+else
+    echo "Error: Configuration file not found at $CONFIG_FILE"
+    exit 1
+fi
 
 # Path to the Python DHCP server script
 DHCP_SERVER_SCRIPT="/home/mkaas/Development/magicDNS_Python3/magicDHCP/dhcp-server/src/dhcp_server.py"

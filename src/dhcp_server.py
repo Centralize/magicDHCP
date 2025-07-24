@@ -3,6 +3,7 @@ import struct
 import time
 import os
 import logging
+import json
 from ipaddress import IPv4Address, IPv4Network
 
 # Configure logging
@@ -10,6 +11,8 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 class DHCPServer:
+    LEASES_FILE = "/home/mkaas/Development/magicDNS_Python3/magicDHCP/dhcp-server/leases.json"
+
     def __init__(self):
         self.server_ip = os.getenv('DHCP_SERVER_IP', '0.0.0.0')
         self.lease_start_ip_str = os.getenv('DHCP_LEASE_START_IP', '192.168.1.100')
@@ -19,6 +22,15 @@ class DHCPServer:
         self.dns_servers_str = os.getenv('DHCP_DNS_SERVERS', '8.8.8.8')
         self.lease_time = int(os.getenv('DHCP_LEASE_TIME', '3600')) # seconds
 
+        # PXE Boot Configuration
+        self.pxe_server_ip_str = os.getenv('PXE_SERVER_IP', '')
+        self.boot_file_bios = os.getenv('BOOT_FILE_BIOS', '')
+        self.boot_file_efi = os.getenv('BOOT_FILE_EFI', '')
+
+        self.pxe_server_ip = None
+        if self.pxe_server_ip_str:
+            self.pxe_server_ip = IPv4Address(self.pxe_server_ip_str)
+
         try:
             self.lease_start_ip = IPv4Address(self.lease_start_ip_str)
             self.lease_end_ip = IPv4Address(self.lease_end_ip_str)
@@ -26,13 +38,20 @@ class DHCPServer:
             self.router_ip = IPv4Address(self.router_ip_str)
             self.dns_servers = [IPv4Address(ip.strip()) for ip in self.dns_servers_str.split(',')]
             
-            # Simple lease pool (MAC address to IP address)
-            self.lease_pool = {}
-            # Track available IPs
+            self.lease_pool = self._load_leases()
             self.available_ips = set()
             current_ip = self.lease_start_ip
             while current_ip <= self.lease_end_ip:
-                self.available_ips.add(str(current_ip))
+                ip_str = str(current_ip)
+                # Check if the IP is currently leased and if the lease is still active
+                is_leased_and_active = False
+                for mac, lease_info in self.lease_pool.items():
+                    if lease_info['ip_address'] == ip_str and lease_info['lease_time_end'] > time.time():
+                        is_leased_and_active = True
+                        break
+                
+                if not is_leased_and_active:
+                    self.available_ips.add(ip_str)
                 current_ip += 1
 
             logger.info(f"DHCP Server initialized.")
@@ -46,6 +65,36 @@ class DHCPServer:
         except Exception as e:
             logger.error(f"Error initializing DHCP server with provided environment variables: {e}")
             raise
+
+    def _load_leases(self):
+        if os.path.exists(self.LEASES_FILE):
+            with open(self.LEASES_FILE, 'r') as f:
+                try:
+                    leases = json.load(f)
+                    # Convert IP addresses back to IPv4Address objects if needed, or keep as strings
+                    # For simplicity, we'll keep them as strings in the lease_pool for now
+                    # Ensure 'is_static' flag is loaded correctly
+                    for mac, lease_info in leases.items():
+                        if 'is_static' not in lease_info:
+                            lease_info['is_static'] = False
+                    return leases
+                except json.JSONDecodeError:
+                    logger.warning(f"Leases file {self.LEASES_FILE} is empty or malformed. Starting with empty lease pool.")
+                    return {}
+        return {}
+
+    def _save_leases(self):
+        with open(self.LEASES_FILE, 'w') as f:
+            # Convert IPv4Address objects to strings for JSON serialization
+            serializable_lease_pool = {
+                mac: {
+                    'ip_address': str(lease_info['ip_address']),
+                    'lease_time_end': lease_info['lease_time_end'],
+                    'is_static': lease_info.get('is_static', False) # Add is_static flag
+                }
+                for mac, lease_info in self.lease_pool.items()
+            }
+            json.dump(serializable_lease_pool, f, indent=4)
 
     def start(self):
         # DHCP servers listen on port 67 (BOOTP server)
@@ -136,6 +185,14 @@ class DHCPServer:
             return IPv4Address(value)
         elif code == 61: # Client Identifier (often MAC address)
             return value # Return as bytes
+        elif code == 93: # Client System Architecture
+            # See RFC 4578 for details on Option 93
+            # https://www.rfc-editor.org/rfc/rfc4578.html
+            # Value is a list of 16-bit unsigned integers
+            architectures = []
+            for i in range(0, len(value), 2):
+                architectures.append(struct.unpack('!H', value[i:i+2])[0])
+            return architectures
         return value # Return raw bytes for other options
 
     def mac_to_str(self, mac_bytes):
@@ -172,22 +229,40 @@ class DHCPServer:
             logger.info(f"Offering new IP {assigned_ip} to {mac_str}")
         
         # Build DHCPOFFER packet
+        offer_options = {
+            1: self.subnet_mask.packed, # Subnet Mask
+            3: self.router_ip.packed, # Router (Gateway)
+            6: b''.join([dns.packed for dns in self.dns_servers]), # DNS Servers
+            51: struct.pack('!I', self.lease_time), # IP Address Lease Time
+            54: IPv4Address(self.server_ip).packed # Server Identifier
+        }
+
+        boot_file = b''
+        if self.pxe_server_ip and (self.boot_file_bios or self.boot_file_efi):
+            # Option 93: Client System Architecture
+            client_arch = options.get(93)
+            if client_arch and (4 in client_arch or 6 in client_arch or 7 in client_arch or 9 in client_arch): # EFI architectures
+                if self.boot_file_efi:
+                    boot_file = self.boot_file_efi.encode()
+                    logger.info(f"Client {mac_str} is EFI, offering bootfile: {self.boot_file_efi}")
+            elif self.boot_file_bios: # Assume BIOS if no EFI arch or no EFI bootfile
+                boot_file = self.boot_file_bios.encode()
+                logger.info(f"Client {mac_str} is BIOS or unknown, offering bootfile: {self.boot_file_bios}")
+            
+            if boot_file:
+                offer_options[67] = boot_file # Option 67: Bootfile Name
+
         offer_packet = self.build_dhcp_packet(
             op=2, # BOOTREPLY
             xid=xid,
             ciaddr=0, # Client IP is 0.0.0.0 in discover
             yiaddr=int(assigned_ip), # Your IP address
-            siaddr=int(IPv4Address(self.server_ip)), # Server IP address
+            siaddr=int(self.pxe_server_ip) if self.pxe_server_ip else int(IPv4Address(self.server_ip)), # Next server IP address (TFTP server)
             giaddr=giaddr, # Gateway IP address (from client)
             chaddr=chaddr,
             message_type=2, # DHCPOFFER
-            options={
-                1: self.subnet_mask.packed, # Subnet Mask
-                3: self.router_ip.packed, # Router (Gateway)
-                6: b''.join([dns.packed for dns in self.dns_servers]), # DNS Servers
-                51: struct.pack('!I', self.lease_time), # IP Address Lease Time
-                54: IPv4Address(self.server_ip).packed # Server Identifier
-            }
+            file=boot_file, # Boot file name in fixed field
+            options=offer_options
         )
         self.sock.sendto(offer_packet, ('<broadcast>', 68)) # Send to broadcast, client listens on 68
 
@@ -203,54 +278,84 @@ class DHCPServer:
         
         # Scenario 1: Client requesting a specific IP (from DHCPDISCOVER)
         if requested_ip:
-            if str(requested_ip) in self.available_ips or (mac_str in self.lease_pool and self.lease_pool[mac_str]['ip_address'] == requested_ip):
+            # Check if the requested IP is a static lease for this MAC
+            if mac_str in self.lease_pool and self.lease_pool[mac_str].get('is_static', False) and self.lease_pool[mac_str]['ip_address'] == str(requested_ip):
+                assigned_ip = requested_ip
+                self.lease_pool[mac_str]['lease_time_end'] = time.time() + (365 * 24 * 3600) # 1 year for static
+                self._save_leases()
+                logger.info(f"Acknowledging static lease for {mac_str} with IP {assigned_ip}")
+            elif str(requested_ip) in self.available_ips or (mac_str in self.lease_pool and self.lease_pool[mac_str]['ip_address'] == str(requested_ip)):
                 # Ensure the request is for *this* server if Server Identifier is present
                 if server_identifier and server_identifier != IPv4Address(self.server_ip):
                     logger.warning(f"Client {mac_str} requested IP {requested_ip} from another server {server_identifier}. Ignoring.")
                     return # Ignore request meant for another server
                 
                 assigned_ip = requested_ip
-                if mac_str not in self.lease_pool: # New lease
+                if mac_str not in self.lease_pool: # New dynamic lease
                     self.lease_pool[mac_str] = {
-                        'ip_address': assigned_ip,
-                        'lease_time_end': time.time() + self.lease_time
+                        'ip_address': str(assigned_ip),
+                        'lease_time_end': time.time() + self.lease_time,
+                        'is_static': False
                     }
                     self.available_ips.discard(str(assigned_ip))
-                    logger.info(f"Acknowledging new lease for {mac_str} with IP {assigned_ip}")
-                else: # Renewing existing lease
+                    self._save_leases() # Save leases after modification
+                    logger.info(f"Acknowledging new dynamic lease for {mac_str} with IP {assigned_ip}")
+                else: # Renewing existing dynamic lease
                     self.lease_pool[mac_str]['lease_time_end'] = time.time() + self.lease_time
-                    logger.info(f"Renewing lease for {mac_str} with IP {assigned_ip}")
+                    self._save_leases() # Save leases after modification
+                    logger.info(f"Renewing dynamic lease for {mac_str} with IP {assigned_ip}")
             else:
                 logger.warning(f"Client {mac_str} requested unavailable or invalid IP {requested_ip}. Sending DHCPNAK.")
                 ack_nack_type = 4 # DHCPNAK
                 assigned_ip = IPv4Address('0.0.0.0') # For NAK, yiaddr is 0
         # Scenario 2: Client re-booting after successful lease (no requested_ip)
         elif mac_str in self.lease_pool:
-            assigned_ip = self.lease_pool[mac_str]['ip_address']
-            self.lease_pool[mac_str]['lease_time_end'] = time.time() + self.lease_time
-            logger.info(f"Client {mac_str} re-booting, acknowledging existing lease for IP {assigned_ip}")
+            lease_info = self.lease_pool[mac_str]
+            assigned_ip = IPv4Address(lease_info['ip_address'])
+            if lease_info.get('is_static', False):
+                lease_info['lease_time_end'] = time.time() + (365 * 24 * 3600) # 1 year for static
+                logger.info(f"Client {mac_str} re-booting, acknowledging static lease for IP {assigned_ip}")
+            else:
+                lease_info['lease_time_end'] = time.time() + self.lease_time
+                logger.info(f"Client {mac_str} re-booting, acknowledging existing dynamic lease for IP {assigned_ip}")
+            self._save_leases() # Save leases after modification
         else:
             logger.warning(f"Client {mac_str} sent DHCPREQUEST without requested IP and no existing lease. Sending DHCPNAK.")
             ack_nack_type = 4 # DHCPNAK
             assigned_ip = IPv4Address('0.0.0.0')
 
         # Build DHCPACK or DHCPNAK packet
+        ack_options = {
+            1: self.subnet_mask.packed, # Subnet Mask
+            3: self.router_ip.packed, # Router (Gateway)
+            6: b''.join([dns.packed for dns in self.dns_servers]), # DNS Servers
+            51: struct.pack('!I', self.lease_time), # IP Address Lease Time
+            54: IPv4Address(self.server_ip).packed # Server Identifier
+        }
+
+        boot_file = b''
+        if self.pxe_server_ip and (self.boot_file_bios or self.boot_file_efi):
+            client_arch = options.get(93)
+            if client_arch and (4 in client_arch or 6 in client_arch or 7 in client_arch or 9 in client_arch): # EFI architectures
+                if self.boot_file_efi:
+                    boot_file = self.boot_file_efi.encode()
+            elif self.boot_file_bios:
+                boot_file = self.boot_file_bios.encode()
+            
+            if boot_file:
+                ack_options[67] = boot_file # Option 67: Bootfile Name
+
         ack_packet = self.build_dhcp_packet(
             op=2, # BOOTREPLY
             xid=xid,
             ciaddr=int(ciaddr) if ciaddr != 0 else 0, # Client IP if known, else 0
             yiaddr=int(assigned_ip),
-            siaddr=int(IPv4Address(self.server_ip)),
+            siaddr=int(self.pxe_server_ip) if self.pxe_server_ip else int(IPv4Address(self.server_ip)),
             giaddr=giaddr,
             chaddr=chaddr,
             message_type=ack_nack_type,
-            options={
-                1: self.subnet_mask.packed, # Subnet Mask
-                3: self.router_ip.packed, # Router (Gateway)
-                6: b''.join([dns.packed for dns in self.dns_servers]), # DNS Servers
-                51: struct.pack('!I', self.lease_time), # IP Address Lease Time
-                54: IPv4Address(self.server_ip).packed # Server Identifier
-            } if ack_nack_type == 6 else {54: IPv4Address(self.server_ip).packed} # Only Server ID for NAK
+            file=boot_file, # Boot file name in fixed field
+            options=ack_options
         )
         self.sock.sendto(ack_packet, ('<broadcast>', 68)) # Send to broadcast
 
@@ -261,6 +366,7 @@ class DHCPServer:
             released_ip = self.lease_pool[mac_str]['ip_address']
             self.available_ips.add(str(released_ip)) # Return IP to available pool
             del self.lease_pool[mac_str]
+            self._save_leases() # Save leases after modification
             logger.info(f"Released IP {released_ip} for {mac_str}.")
         else:
             logger.warning(f"Received DHCPRELEASE from {mac_str} but no active lease found.")
@@ -292,7 +398,7 @@ class DHCPServer:
         
         packet += chaddr.ljust(16, b'\x00') # Client hardware address (16 bytes, padded)
         packet += b'\x00' * 64 # Server host name (sname) - 64 bytes, all zeros
-        packet += b'\x00' * 128 # Boot file name (file) - 128 bytes, all zeros
+        packet += file.ljust(128, b'\x00') # Boot file name (file) - 128 bytes, padded
 
         # DHCP Magic Cookie
         packet += b'\x63\x82\x53\x63' # 99.130.83.99
@@ -301,8 +407,15 @@ class DHCPServer:
         # Option 53: DHCP Message Type
         packet += struct.pack('!BB', 53, 1) + struct.pack('!B', message_type) # Type: 1=DISCOVER, 2=OFFER, 3=REQUEST, 4=DECLINE, 5=ACK, 6=NAK, 7=RELEASE
 
+        # Add PXE options if configured
+        if self.pxe_server_ip_str and (message_type == 2 or message_type == 5): # DHCPOFFER or DHCPACK
+            # Option 66: TFTP Server Name
+            packet += struct.pack('!BB', 66, len(self.pxe_server_ip_str)) + self.pxe_server_ip_str.encode()
+            # Option 67: Bootfile Name (handled in handle_discover/request based on client arch)
+            # This will be added dynamically in handle_discover/request
+
         for code, value in options.items():
-            if code == 53: # Already handled
+            if code == 53 or code == 66 or code == 67: # Already handled or will be handled dynamically
                 continue
             packet += struct.pack('!BB', code, len(value)) + value
         
