@@ -9,14 +9,10 @@ services:
     # Be aware that this gives the container direct access to the host's network interfaces.
     network_mode: host
     # Environment variables for DHCP server configuration
-    environment:
-      - DHCP_SERVER_IP=0.0.0.0 # Listen on all interfaces. Adjust if you need a specific interface.
-      - DHCP_LEASE_START_IP=192.168.1.100
-      - DHCP_LEASE_END_IP=192.168.1.200
-      - DHCP_SUBNET_MASK=255.255.255.0
-      - DHCP_ROUTER_IP=192.168.1.1
-      - DHCP_DNS_SERVERS=8.8.8.8,8.8.4.4
-      - DHCP_LEASE_TIME=3600
+    env_file:
+      - ./config
+    volumes:
+      - ./leases.json:/app/leases.json:rw
     # Restart policy
     restart: unless-stopped
     # Add capabilities to allow binding to privileged ports (like 67)

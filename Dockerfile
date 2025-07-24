@@ -13,6 +13,8 @@ WORKDIR /app
 
 # Copy the current directory contents into the container at /app
 COPY src/dhcp_server.py .
+COPY config .
+COPY leases.json .
 
 # Expose the DHCP server ports
 # UDP port 67 (DHCP server) and 68 (DHCP client)
