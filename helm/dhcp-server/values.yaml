@@ -1,0 +1,73 @@
+# Default values for dhcp-server.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+replicaCount: 1
+
+image:
+  repository: your-username/dhcp-server # Replace with your Docker image repository
+  pullPolicy: IfNotPresent
+  # Overrides the image tag whose default is the chart appVersion.
+  tag: "1.0.0" # Matches appVersion in Chart.yaml
+
+# DHCP server configuration environment variables
+# Note: For a DHCP server in Kubernetes, it's highly complex due to network limitations.
+# Kubernetes pods run in their own network namespaces. A DHCP server needs to
+# send and receive broadcast packets on the underlying network, which is
+# typically not supported by standard Kubernetes network plugins (like Calico, Flannel, etc.)
+# which are designed for IP routing, not layer 2 broadcasts.
+#
+# To make a DHCP server work in Kubernetes, you would typically need:
+# 1. HostNetwork: true - This makes the pod use the node's network namespace,
+#    allowing it to send/receive broadcasts. This is a security risk as the pod
+#    can see all traffic on the node's network interfaces.
+# 2. Privileged or specific capabilities (NET_ADMIN, NET_RAW) - Required to bind
+#    to privileged ports (67) and manipulate network interfaces.
+# 3. Dedicated node: It's often recommended to run such a specialized service
+#    on a dedicated node, possibly tainted, to avoid interference with other workloads.
+#
+# This Helm chart demonstrates the structure, but a fully functional
+# Kubernetes-based DHCP server deployment requires careful consideration
+# of your CNI (Container Network Interface) and security policies.
+
+dhcpConfig:
+  serverIp: "0.0.0.0" # Listen on all interfaces of the host if hostNetwork is true
+  leaseStartIp: "192.168.1.100"
+  leaseEndIp: "192.168.1.200"
+  subnetMask: "255.255.255.0"
+  routerIp: "192.168.1.1"
+  dnsServers: "8.8.8.8,8.8.4.4"
+  leaseTime: 3600 # seconds
+
+service:
+  type: ClusterIP # Service type (ClusterIP, NodePort, LoadBalancer) - mostly for internal access or if not using hostNetwork
+  port: 67 # DHCP uses UDP port 67 (server) and 68 (client)
+
+# Resource limits and requests for the pod
+resources: {}
+  # We usually recommend not to specify default resources and let the cluster default them to avoid unexpected behaviors.
+  # limits:
+  #   cpu: 100m
+  #   memory: 128Mi
+  # requests:
+  #   cpu: 100m
+  #   memory: 128Mi
+
+# Node selector to schedule the pod on specific nodes
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
+
+# SecurityContext for the pod and container
+podSecurityContext:
+  runAsUser: 0 # Run as root to allow binding to privileged ports and hostNetwork
+  runAsGroup: 0
+  fsGroup: 0 # Set fsGroup if you have volume mounts that need specific permissions
+
+containerSecurityContext:
+  privileged: true # This is generally required for hostNetwork and raw socket access. Exercise caution.
+  # If privileged=true is not desired, try specific capabilities:
+  # capabilities:
+  #   add: ["NET_ADMIN", "NET_RAW"]

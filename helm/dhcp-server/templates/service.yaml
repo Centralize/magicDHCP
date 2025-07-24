@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "dhcp-server.fullname" . }}
+  labels:
+    {{- include "dhcp-server.labels" . | nindent 4 }}
+spec:
+  # Set type to ClusterIP as a standard Kubernetes service might not be directly
+  # used by external DHCP clients when hostNetwork is true.
+  # This service would mainly be for internal cluster communication or health checks
+  # if the DHCP server had an internal API.
+  type: {{ .Values.service.type }}
+  ports:
+    - port: {{ .Values.service.port }}
+      targetPort: dhcp-udp # Name defined in deployment container ports
+      protocol: UDP
+      name: dhcp
+  selector:
+    {{- include "dhcp-server.selectorLabels" . | nindent 4 }}

@@ -1,0 +1,18 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.pyc
+*.pyd
+*.pyo
+*.egg-info/
+
+# Python virtual environmentenv/
+.venv/
+
+# Editor/IDE specific files
+.vscode/
+.idea/
+
+# Docker build artifacts
+*.log
+!helm/
+!src/

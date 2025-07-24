@@ -1,0 +1,24 @@
+apiVersion: v2
+name: dhcp-server
+description: A Helm chart for deploying a Python-based DHCP server on Kubernetes.
+
+# A chart can be either an 'application' or a 'library' chart.
+#
+# Application charts are a collection of templates that can be deployed
+# on a Kubernetes cluster.
+#
+# Library charts provide useful utilities or functions for the chart
+# developer. They're rendered as part of the application charts.
+type: application
+
+# This is the chart version. This version number should be incremented
+# each time you make changes to the chart and want to release a new version.
+version: 0.1.0
+
+# This is the version number of the application being deployed. This might be used
+# for display purposes or as a tag for the container image.
+appVersion: "1.0.0"
+
+# Source code of the application
+sources:
+  - https://github.com/your-username/dhcp-server

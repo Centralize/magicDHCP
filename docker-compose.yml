@@ -1,0 +1,33 @@
+version: '3.8'
+
+services:
+  dhcp-server:
+    build: .
+    container_name: dhcp-server
+    # Use 'host' network mode for DHCP to properly receive broadcast packets.
+    # This means the container shares the host's network stack.
+    # Be aware that this gives the container direct access to the host's network interfaces.
+    network_mode: host
+    # Environment variables for DHCP server configuration
+    environment:
+      - DHCP_SERVER_IP=0.0.0.0 # Listen on all interfaces. Adjust if you need a specific interface.
+      - DHCP_LEASE_START_IP=192.168.1.100
+      - DHCP_LEASE_END_IP=192.168.1.200
+      - DHCP_SUBNET_MASK=255.255.255.0
+      - DHCP_ROUTER_IP=192.168.1.1
+      - DHCP_DNS_SERVERS=8.8.8.8,8.8.4.4
+      - DHCP_LEASE_TIME=3600
+    # Restart policy
+    restart: unless-stopped
+    # Add capabilities to allow binding to privileged ports (like 67)
+    # and to raw sockets for DHCP. This is an alternative to running as root inside container.
+    # However, 'network_mode: host' often requires more elevated privileges anyway.
+    # For a full production setup, a more fine-grained capability management or a dedicated
+    # network plugin might be considered for better security.
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    # User to run the process as. Not 'root' for security best practice.
+    # However, binding to privileged ports or using raw sockets will require root or CAP_NET_BIND_SERVICE/CAP_NET_RAW.
+    # With 'network_mode: host' and cap_add, 'root' might be the simplest for this example.
+    # user: "1000:1000" # Example non-root user (uid:gid) - requires more setup if binding privileged ports

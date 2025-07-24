@@ -1,0 +1,87 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "dhcp-server.fullname" . }}
+  labels:
+    {{- include "dhcp-server.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "dhcp-server.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "dhcp-server.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "dhcp-server.serviceAccountName" . }}
+      # VERY IMPORTANT for DHCP server: Host network mode
+      # This allows the pod to use the node's network namespace,
+      # which is typically required for DHCP to send/receive broadcast packets
+      # on the physical network interface.
+      # WARNING: This grants the pod significant network access and is a security concern.
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet # Ensures DNS resolution works with hostNetwork
+      
+      # Security context for the pod
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: {{ .Chart.Name }}
+          {{- with .Values.containerSecurityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - name: DHCP_SERVER_IP
+              value: {{ .Values.dhcpConfig.serverIp | quote }}
+            - name: DHCP_LEASE_START_IP
+              value: {{ .Values.dhcpConfig.leaseStartIp | quote }}
+            - name: DHCP_LEASE_END_IP
+              value: {{ .Values.dhcpConfig.leaseEndIp | quote }}
+            - name: DHCP_SUBNET_MASK
+              value: {{ .Values.dhcpConfig.subnetMask | quote }}
+            - name: DHCP_ROUTER_IP
+              value: {{ .Values.dhcpConfig.routerIp | quote }}
+            - name: DHCP_DNS_SERVERS
+              value: {{ .Values.dhcpConfig.dnsServers | quote }}
+            - name: DHCP_LEASE_TIME
+              value: {{ .Values.dhcpConfig.leaseTime | quote }}
+          ports:
+            - name: dhcp-udp
+              containerPort: 67
+              protocol: UDP
+            - name: dhcp-client-udp
+              containerPort: 68
+              protocol: UDP
+          # Add resource requests/limits if defined in values.yaml
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
