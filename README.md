@@ -85,6 +85,8 @@ docker build -t dhcp-server .
 
 #### Run the Docker Container
 
+When running with Docker, you'll need to pass the configuration as environment variables.
+
 ```bash
 docker run -d \
   --name dhcp-server \
@@ -96,6 +98,9 @@ docker run -d \
   -e DHCP_ROUTER_IP="192.168.1.1" \
   -e DHCP_DNS_SERVERS="8.8.8.8,8.8.4.4" \
   -e DHCP_LEASE_TIME="3600" \
+  -e PXE_SERVER_IP="192.168.1.1" \
+  -e BOOT_FILE_BIOS="pxelinux.0" \
+  -e BOOT_FILE_EFI="bootx64.efi" \
   dhcp-server
 ```
 
