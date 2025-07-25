@@ -38,6 +38,8 @@ dhcpConfig:
   routerIp: "192.168.1.1"
   dnsServers: "8.8.8.8,8.8.4.4"
   leaseTime: 3600 # seconds
+  nisDomain: "" # NIS Domain Name (Option 64)
+  nisServers: "" # Comma-separated list of NIS Server IP addresses (Option 65)
 
 service:
   type: ClusterIP # Service type (ClusterIP, NodePort, LoadBalancer) - mostly for internal access or if not using hostNetwork

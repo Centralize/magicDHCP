@@ -53,6 +53,8 @@ The DHCP server configuration will primarily be handled via environment variable
   * `DHCP_ROUTER_IP`: The default gateway IP address (e.g., `192.168.1.1`).
   * `DHCP_DNS_SERVERS`: Comma-separated list of DNS server IPs (e.g., `8.8.8.8,8.8.4.4`).
   * `DHCP_LEASE_TIME`: Lease time in seconds (e.g., `3600` for 1 hour).
+  * `DHCP_NIS_DOMAIN`: The NIS (Network Information Service) domain name (e.g., `example.com`).
+  * `DHCP_NIS_SERVERS`: Comma-separated list of NIS server IP addresses (e.g., `192.168.1.10,192.168.1.11`).
 
 ## Running the DHCP Server
 

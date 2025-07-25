@@ -61,6 +61,10 @@ spec:
               value: {{ .Values.dhcpConfig.dnsServers | quote }}
             - name: DHCP_LEASE_TIME
               value: {{ .Values.dhcpConfig.leaseTime | quote }}
+            - name: DHCP_NIS_DOMAIN
+              value: {{ .Values.dhcpConfig.nisDomain | quote }}
+            - name: DHCP_NIS_SERVERS
+              value: {{ .Values.dhcpConfig.nisServers | quote }}
           ports:
             - name: dhcp-udp
               containerPort: 67

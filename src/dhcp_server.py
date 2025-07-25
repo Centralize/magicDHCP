@@ -22,6 +22,10 @@ class DHCPServer:
         self.dns_servers_str = os.getenv('DHCP_DNS_SERVERS', '8.8.8.8')
         self.lease_time = int(os.getenv('DHCP_LEASE_TIME', '3600')) # seconds
 
+        # NIS Configuration (RFC 2132, Options 64 and 65)
+        self.nis_domain_name = os.getenv('DHCP_NIS_DOMAIN', '')
+        self.nis_server_ips_str = os.getenv('DHCP_NIS_SERVERS', '')
+
         # PXE Boot Configuration
         self.pxe_server_ip_str = os.getenv('PXE_SERVER_IP', '')
         self.boot_file_bios = os.getenv('BOOT_FILE_BIOS', '')
@@ -38,6 +42,10 @@ class DHCPServer:
             self.router_ip = IPv4Address(self.router_ip_str)
             self.dns_servers = [IPv4Address(ip.strip()) for ip in self.dns_servers_str.split(',')]
             
+            self.nis_server_ips = []
+            if self.nis_server_ips_str:
+                self.nis_server_ips = [IPv4Address(ip.strip()) for ip in self.nis_server_ips_str.split(',')]
+
             self.lease_pool = self._load_leases()
             self.available_ips = set()
             current_ip = self.lease_start_ip
@@ -237,6 +245,11 @@ class DHCPServer:
             54: IPv4Address(self.server_ip).packed # Server Identifier
         }
 
+        if self.nis_domain_name:
+            offer_options[64] = self.nis_domain_name.encode() # Option 64: NIS Domain Name
+        if self.nis_server_ips:
+            offer_options[65] = b''.join([ip.packed for ip in self.nis_server_ips]) # Option 65: NIS Server Addresses
+
         boot_file = b''
         if self.pxe_server_ip and (self.boot_file_bios or self.boot_file_efi):
             # Option 93: Client System Architecture
@@ -332,6 +345,11 @@ class DHCPServer:
             51: struct.pack('!I', self.lease_time), # IP Address Lease Time
             54: IPv4Address(self.server_ip).packed # Server Identifier
         }
+
+        if self.nis_domain_name:
+            ack_options[64] = self.nis_domain_name.encode() # Option 64: NIS Domain Name
+        if self.nis_server_ips:
+            ack_options[65] = b''.join([ip.packed for ip in self.nis_server_ips]) # Option 65: NIS Server Addresses
 
         boot_file = b''
         if self.pxe_server_ip and (self.boot_file_bios or self.boot_file_efi):
